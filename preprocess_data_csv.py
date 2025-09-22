@@ -121,6 +121,53 @@ def create_feature_sequence(df: pd.DataFrame):
     
     return full_sequence, header
 
+# Add this new function to preprocess_data_csv.py
+
+def preprocess_single_csv(raw_csv_path: str, exercise_name: str, output_path: str):
+    """
+    Processes a single raw data CSV file using a pre-fitted scaler and
+    pre-defined normalization parameters.
+    """
+    # --- 1. Load the pre-fitted scaler and normalization parameters ---
+    if not SCALER_PATH.exists():
+        raise FileNotFoundError(f"Scaler file not found at {SCALER_PATH}. Please ensure it exists.")
+    with open(SCALER_PATH, 'rb') as f:
+        scaler = pickle.load(f)
+
+    if not TARGET_LENGTHS_PATH.exists():
+        raise FileNotFoundError(f"Normalization params file not found at {TARGET_LENGTHS_PATH}.")
+    with open(TARGET_LENGTHS_PATH, 'r') as f:
+        exercise_target_lengths = json.load(f)
+        
+    if exercise_name not in exercise_target_lengths:
+        raise ValueError(f"Exercise '{exercise_name}' not found in {TARGET_LENGTHS_PATH}. Cannot determine target sequence length.")
+    TARGET_SEQ_LENGTH = exercise_target_lengths[exercise_name]
+    
+    print(f"   - Using pre-fitted scaler from: {SCALER_PATH}")
+    print(f"   - Normalizing sequence length for '{exercise_name}' to {TARGET_SEQ_LENGTH} frames.")
+
+    # --- 2. Load and process the raw data ---
+    df = pd.read_csv(raw_csv_path)
+    full_sequence, header = create_feature_sequence(df)
+
+    if full_sequence.shape[0] < 2:
+        print("   - ⚠️ Warning: Sequence too short (< 2 frames). Skipping file.")
+        return
+
+    # Replace any potential NaNs or infs from bad frames
+    full_sequence[~np.isfinite(full_sequence)] = 0.0
+
+    # --- 3. Scale, Resample, and Save ---
+    scaled_sequence = scaler.transform(full_sequence)
+    
+    original_len = scaled_sequence.shape[0]
+    resampler = interp1d(np.linspace(0, 1, original_len), scaled_sequence, axis=0)
+    resampled_sequence = resampler(np.linspace(0, 1, TARGET_SEQ_LENGTH))
+    
+    processed_df = pd.DataFrame(resampled_sequence, columns=header)
+    processed_df.to_csv(output_path, index=False)
+    print(f"   - Successfully saved processed file to {output_path}")
+
 # =================================================================================
 # MAIN PREPROCESSING FUNCTION (Logic remains the same, but operates on new features)
 # =================================================================================
